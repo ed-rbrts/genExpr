@@ -1,0 +1,81 @@
+get_trigger(_count, _instance, _dat) {
+	
+	current = _count == _instance;
+	previous = peek(_dat, _instance, 0);
+	poke(_dat, current, _instance, 0);
+	return (current - previous) == 1;		
+}
+get_count(_dat, _instance, _trig) {
+	
+	count = peek(_dat, _instance, 1);
+	count = _trig? 0 : count + 1;
+	poke(_dat, count, _instance, 1);
+	return count;		
+}
+latchy(_trigger, _val, _dat, _instance, _channel) {
+	
+	val = _val;
+	if(_trigger) {
+		poke(_dat, val, _instance, _channel);
+	}
+	else {
+		val = peek(_dat, _instance, _channel);
+	}
+	return val;	
+}
+pan(_aud, _str_sprd, _trig, _dat, _instance, _channel) {
+	
+	pan_pos = 0.5 + (noise() * 0.5 * _str_sprd);
+	pan_pos = latchy(_trig, pan_pos, _dat, _instance, _channel);
+	
+	pan_left = sqrt(1 - pan_pos);
+	pan_right = sqrt(pan_pos);
+	
+	l = _aud * pan_left;
+	r = _aud * pan_right;
+	
+	return l, r;	
+}
+	
+Param density(30, min=0, max=100);
+Param position(0, min=0, max=1);
+Param size(200, min=2, max=500);
+Param pitch(0, min=-48, max=48);
+Param spread(0, min=0, max=1);
+Param spray(0, min=0, max=1);
+Param stereo_spread(1, min=0, max=1);
+
+Buffer smpl("smpl");
+Data info(30, 6);
+
+voices = 30;
+p = phasor(density);
+p = delta(p) < 0;
+c = counter(p, in1, voices);
+out_left = 0;
+out_right = 0;
+
+for(i = 0; i < voices; i += 1) {
+		
+	trigger = get_trigger(c, i, info);	
+	count = get_count(info, i, trigger);	
+	sz = mstosamps(size);
+	sz = latchy(trigger, sz, info, i, 2);
+	phase = min(1, count/sz);			
+	amp = 0.5 - 0.5 * cos(phase * twopi); // Hann function	
+	sprd = noise() * 12 * spread;
+	ptch = pow(2, (pitch + sprd)/12);
+	ptch = latchy(trigger, ptch, info, i, 3);
+	spry = noise() * 0.5 * spray;
+	start_pos = (position + spry) * dim(smpl);
+	start_pos = latchy(trigger, start_pos, info, i, 4);
+	playhead = start_pos + (count * ptch);
+	smp = peek(smpl, playhead, 0, index="samples", interp="cubic", boundmode="wrap");
+	grain = amp * smp;
+	l, r = pan(grain, stereo_spread, trigger, info, i, 5);
+	out_left += l;
+	out_right += r;
+	
+}
+
+out1, out2 = out_left, out_right;
